@@ -506,6 +506,9 @@
                     stockData: cachedStockData[selectedIndustry] || []
                 };
 
+                console.log('发送AI请求:', requestData);
+                console.log('API地址:', API_BASE_URL);
+
                 const response = await fetch(`${API_BASE_URL}/chat`, {
                     method: 'POST',
                     headers: {
@@ -513,6 +516,8 @@
                     },
                     body: JSON.stringify(requestData)
                 });
+
+                console.log('API响应状态:', response.status, response.statusText);
 
                 removeTyping();
 
@@ -535,7 +540,16 @@
             } catch (error) {
                 removeTyping();
                 console.error('AI对话错误:', error);
-                addMessage('<p class="text-red-400">网络错误：无法连接到AI服务。请检查网络连接。</p>', 'assistant');
+                console.error('错误详情:', error.message);
+                console.error('错误堆栈:', error.stack);
+
+                // 显示详细的错误信息
+                const errorMsg = `
+                    <p class="text-red-400">⚠️ 连接AI服务时出现问题</p>
+                    <p class="text-slate-400 text-sm mt-2">错误信息: ${error.message}</p>
+                    <p class="text-slate-400 text-xs mt-1">请检查浏览器控制台(F12)查看详细日志</p>
+                `;
+                addMessage(errorMsg, 'assistant');
             }
         }
 
