@@ -221,7 +221,7 @@
         // 自动检测环境并选择API地址
         const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
         // 部署到线上后，替换为你的Render后端URL
-        const PRODUCTION_API_URL = 'https://ai-financial-investment-assistant.onrender.com/api';
+        const PRODUCTION_API_URL = 'https://stock-analysis-api.onrender.com/api';
         const DEV_API_URL = 'http://localhost:5001/api';
         const API_BASE_URL = isProduction ? PRODUCTION_API_URL : DEV_API_URL;
 
@@ -472,58 +472,71 @@
             processUserMessage(message);
         }
 
-        function processUserMessage(message) {
+        async function processUserMessage(message) {
             showTyping();
 
-            setTimeout(() => {
-                removeTyping();
-                let response = '';
-
-                if (message.includes('分析') || message.includes('推荐')) {
-                    if (selectedIndustry) {
-                        response = analyzeIndustry(selectedIndustry);
-                    } else {
-                        response = generateIndustrySelectionPrompt();
-                    }
-                } else if (message.includes('科技')) {
-                    selectIndustry('tech');
-                    return;
-                } else if (message.includes('金融')) {
-                    selectIndustry('finance');
-                    return;
-                } else if (message.includes('医疗') || message.includes('医药')) {
-                    selectIndustry('healthcare');
-                    return;
-                } else if (message.includes('消费')) {
-                    selectIndustry('consumer');
-                    return;
-                } else if (message.includes('报告')) {
+            try {
+                // 快捷操作仍然使用本地处理
+                if (message.includes('报告')) {
+                    removeTyping();
                     generateReport();
                     return;
-                } else if (message.includes('对比') || message.includes('比较')) {
-                    response = compareStocks();
-                } else if (message.includes('刷新')) {
-                    response = '正在刷新Tushare数据...';
-                    refreshAllData();
-                    return;
-                } else if (message.includes('状态')) {
-                    response = apiOnline ?
-                        '<p class="text-emerald-400"><i class="fas fa-check-circle mr-2"></i>Tushare API服务正常，数据来���可靠</p>' :
-                        '<p class="text-red-400"><i class="fas fa-times-circle mr-2"></i>Tushare API服务离线，请检查Python服务</p>';
-                } else {
-                    response = `
-                        <p class="text-slate-200">感谢您的提问！作为您的投资分析助手，我可以帮您：</p>
-                        <ul class="text-slate-300 mt-2 space-y-1 text-sm">
-                            <li><i class="fas fa-chevron-right text-emerald-400 mr-2"></i>选择左侧行业开始分析</li>
-                            <li><i class="fas fa-chevron-right text-emerald-400 mr-2"></i>发送"分析"获取当前行业推荐</li>
-                            <li><i class="fas fa-chevron-right text-emerald-400 mr-2"></i>发送"报告"生成详细投资报告</li>
-                            <li><i class="fas fa-chevron-right text-emerald-400 mr-2"></i>发送"刷新"重新获取Tushare数据</li>
-                        </ul>
-                    `;
                 }
 
-                addMessage(response, 'assistant');
-            }, 800);
+                if (message.includes('刷新')) {
+                    removeTyping();
+                    addMessage('正在刷新Tushare数据...', 'assistant');
+                    refreshAllData();
+                    return;
+                }
+
+                if (message.includes('状态')) {
+                    removeTyping();
+                    const response = apiOnline ?
+                        '<p class="text-emerald-400"><i class="fas fa-check-circle mr-2"></i>Tushare API服务正常，数据来源可靠</p>' :
+                        '<p class="text-red-400"><i class="fas fa-times-circle mr-2"></i>Tushare API服务离线，请检查Python服务</p>';
+                    addMessage(response, 'assistant');
+                    return;
+                }
+
+                // 其他问题交给AI处理
+                const requestData = {
+                    message: message,
+                    industryId: selectedIndustry,
+                    stockData: cachedStockData[selectedIndustry] || []
+                };
+
+                const response = await fetch(`${API_BASE_URL}/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                removeTyping();
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        // 将AI回复的换行符转换为HTML
+                        const formattedReply = data.reply
+                            .replace(/\n/g, '<br>')
+                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                            .replace(/\*(.*?)\*/g, '<em>$1</em>');
+                        addMessage(formattedReply, 'assistant');
+                    } else {
+                        addMessage(`<p class="text-red-400">AI错误: ${data.error || '未知错误'}</p>`, 'assistant');
+                    }
+                } else {
+                    addMessage('<p class="text-red-400">AI服务暂时无法响应，请稍后再试。</p>', 'assistant');
+                }
+
+            } catch (error) {
+                removeTyping();
+                console.error('AI对话错误:', error);
+                addMessage('<p class="text-red-400">网络错误：无法连接到AI服务。请检查网络连接。</p>', 'assistant');
+            }
         }
 
         function selectIndustry(industryId) {
