@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能投资分析 Agent - Tushare数据版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+    <style>
+        .chat-container { height: calc(100vh - 200px); }
+        .message-enter { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .typing-indicator span {
+            animation: blink 1.4s infinite both;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink {
+            0%, 100% { opacity: 0.2; }
+            50% { opacity: 1; }
+        }
+        .report-section { page-break-inside: avoid; }
+        @media print {
+            .no-print { display: none; }
+            .report-container { box-shadow: none !important; }
+        }
+        .price-up { color: #ef4444; }
+        .price-down { color: #22c55e; }
+        .price-flat { color: #6b7280; }
+        .loading-spinner {
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top: 2px solid #10b981;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-online { background: #10b981; box-shadow: 0 0 8px #10b981; }
+        .status-offline { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+        .status-loading { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 min-h-screen">
+    <div id="app" class="container mx-auto px-4 py-6 max-w-6xl">
+        <!-- 头部 -->
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-white mb-2">
+                <i class="fas fa-chart-line text-emerald-400 mr-2"></i>
+                智能投资分析 Agent
+                <span class="text-sm font-normal text-slate-400 ml-2">（Tushare专业数据）</span>
+            </h1>
+            <p class="text-slate-400">
+                <span class="status-dot status-online" id="apiStatus"></span>
+                基于Tushare的A股智能选股与投资分析系统 | 数据来源：Tushare Pro API
+            </p>
+        </header>
+
+        <!-- 主界面 -->
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <!-- 左侧面板 -->
+            <div class="lg:col-span-1 no-print">
+                <!-- 行业选择 -->
+                <div class="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold text-white">
+                            <i class="fas fa-industry mr-2 text-amber-400"></i>行业选择
+                        </h2>
+                        <button onclick="refreshAllData()" id="refreshBtn" class="text-slate-400 hover:text-emerald-400 transition" title="刷新数据">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                    <div id="industryList" class="space-y-2">
+                        <!-- 行业列表将由 JS 生成 -->
+                    </div>
+                </div>
+
+                <!-- 数据状态 -->
+                <div class="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700 mt-4">
+                    <h2 class="text-lg font-semibold text-white mb-3">
+                        <i class="fas fa-database mr-2 text-blue-400"></i>数据状态
+                    </h2>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">API状态</span>
+                            <span id="apiStatusText" class="text-emerald-400">检测中</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">更新时间</span>
+                            <span id="updateTime" class="text-slate-200">--</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">数据来源</span>
+                            <span class="text-emerald-400">Tushare</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400">股票数量</span>
+                            <span id="stockCount" class="text-slate-200">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 分析参数 -->
+                <div class="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700 mt-4">
+                    <h2 class="text-lg font-semibold text-white mb-4">
+                        <i class="fas fa-sliders mr-2 text-blue-400"></i>分析参数
+                    </h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="text-slate-300 text-sm block mb-1">投资策略</label>
+                            <select id="strategy" class="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600">
+                                <option value="value">价值投资（低PE）</option>
+                                <option value="growth">成长投资（高ROE）</option>
+                                <option value="dividend">红利投资（高股息）</option>
+                                <option value="balanced">平衡策略（综合）</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-slate-300 text-sm block mb-1">推荐数量</label>
+                            <input type="range" id="recommendCount" min="3" max="8" value="5" class="w-full">
+                            <span id="recommendCountValue" class="text-emerald-400 text-sm">5 只股票</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧 - 对话区域 -->
+            <div class="lg:col-span-3">
+                <div class="bg-slate-800/50 backdrop-blur rounded-xl border border-slate-700 overflow-hidden">
+                    <!-- 聊天历史 -->
+                    <div id="chatContainer" class="chat-container overflow-y-auto p-4 space-y-4">
+                        <!-- 欢迎消息 -->
+                        <div class="message-enter">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0">
+                                    <i class="fas fa-robot text-white"></i>
+                                </div>
+                                <div class="bg-slate-700/50 rounded-2xl rounded-tl-none px-4 py-3 max-w-2xl">
+                                    <p class="text-slate-200">您好！我是您的智能投资分析助手。我可以帮助您：</p>
+                                    <ul class="text-slate-300 mt-2 space-y-1 text-sm">
+                                        <li><i class="fas fa-check-circle text-emerald-400 mr-2"></i>基于Tushare专业数据分析A股市场</li>
+                                        <li><i class="fas fa-check-circle text-emerald-400 mr-2"></i>提供实时行情和财务指标分析</li>
+                                        <li><i class="fas fa-check-circle text-emerald-400 mr-2"></i>生成专业投资研究报告</li>
+                                        <li><i class="fas fa-check-circle text-emerald-400 mr-2"></i>智能选股与投资建议</li>
+                                    </ul>
+                                    <p class="text-slate-300 mt-3 text-sm"><i class="fas fa-info-circle text-amber-400 mr-1"></i>正在连接Tushare API...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 输入区域 -->
+                    <div class="border-t border-slate-700 p-4 no-print">
+                        <div class="flex gap-3">
+                            <input type="text" id="userInput" placeholder="输入您的问题，如：帮我分析一下科技行业的投资机会..."
+                                class="flex-1 bg-slate-700 text-white rounded-xl px-4 py-3 border border-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20">
+                            <button onclick="sendMessage()" class="bg-gradient-to-r from-emerald-500 to-cyan-500 text-white px-6 py-3 rounded-xl hover:opacity-90 transition font-medium">
+                                <i class="fas fa-paper-plane mr-2"></i>发送
+                            </button>
+                        </div>
+                        <div class="flex gap-2 mt-3 flex-wrap">
+                            <button onclick="quickAction('analyze')" class="text-sm bg-slate-700/50 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-700 transition">
+                                <i class="fas fa-search mr-1"></i>开始分析
+                            </button>
+                            <button onclick="quickAction('report')" class="text-sm bg-slate-700/50 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-700 transition">
+                                <i class="fas fa-file-pdf mr-1"></i>生成报告
+                            </button>
+                            <button onclick="quickAction('compare')" class="text-sm bg-slate-700/50 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-700 transition">
+                                <i class="fas fa-balance-scale mr-1"></i>股票对比
+                            </button>
+                            <button onclick="quickAction('top')" class="text-sm bg-slate-700/50 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-700 transition">
+                                <i class="fas fa-trophy mr-1"></i>涨幅榜
+                            </button>
+                            <button onclick="clearChat()" class="text-sm bg-slate-700/50 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-700 transition ml-auto">
+                                <i class="fas fa-trash mr-1"></i>清空
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 报告模态框 -->
+    <div id="reportModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
+            <div class="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                <h2 class="text-xl font-bold text-slate-800">
+                    <i class="fas fa-file-alt text-emerald-500 mr-2"></i>投资分析报告
+                </h2>
+                <div class="flex gap-2">
+                    <button onclick="printReport()" class="bg-slate-200 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-300 transition">
+                        <i class="fas fa-print mr-2"></i>打印
+                    </button>
+                    <button onclick="closeReport()" class="bg-slate-200 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-300 transition">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div id="reportContent" class="p-6 overflow-y-auto max-h-[calc(90vh-100px)] report-container">
+                <!-- 报告内容将由 JS 生成 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 配置 ====================
+        // 自动检测环境并选择API地址
+        const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+        // 部署到线上后，替换为你的Render后端URL
+        const PRODUCTION_API_URL = 'https://stock-analysis-api.onrender.com/api';
+        const DEV_API_URL = 'http://localhost:5001/api';
+        const API_BASE_URL = isProduction ? PRODUCTION_API_URL : DEV_API_URL;
+
+        // 行业信息
+        const industries = [
+            { id: 'tech', name: '科技', icon: 'fa-microchip', color: 'from-blue-500 to-cyan-500' },
+            { id: 'finance', name: '金融', icon: 'fa-university', color: 'from-amber-500 to-orange-500' },
+            { id: 'healthcare', name: '医疗', icon: 'fa-heartbeat', color: 'from-rose-500 to-pink-500' },
+            { id: 'consumer', name: '消费', icon: 'fa-shopping-cart', color: 'from-emerald-500 to-green-500' },
+            { id: 'energy', name: '能源', icon: 'fa-bolt', color: 'from-yellow-500 to-amber-500' },
+            { id: 'realestate', name: '地产', icon: 'fa-building', color: 'from-purple-500 to-violet-500' },
+            { id: 'manufacturing', name: '制造', icon: 'fa-cogs', color: 'from-slate-500 to-gray-500' },
+            { id: 'utilities', name: '公用', icon: 'fa-plug', color: 'from-teal-500 to-cyan-500' }
+        ];
+
+        // 缓存的股票数据
+        let cachedStockData = {};
+        let selectedIndustry = null;
+        let apiOnline = false;
+
+        // ==================== API调用函数 ====================
+
+        // 检查API状态
+        async function checkApiStatus() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/health`);
+                if (response.ok) {
+                    apiOnline = true;
+                    document.getElementById('apiStatus').className = 'status-dot status-online';
+                    document.getElementById('apiStatusText').textContent = '在线';
+                    document.getElementById('apiStatusText').className = 'text-emerald-400';
+                    return true;
+                }
+            } catch (error) {
+                console.error('API连接失败:', error);
+            }
+            apiOnline = false;
+            document.getElementById('apiStatus').className = 'status-dot status-offline';
+            document.getElementById('apiStatusText').textContent = '离线';
+            document.getElementById('apiStatusText').className = 'text-red-400';
+            return false;
+        }
+
+        // 获取行业财务数据
+        async function fetchIndustryFinancialData(industryId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/stocks/${industryId}/financial`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                return data.stocks || [];
+            } catch (error) {
+                console.error(`获取${industryId}行业数据失败:`, error);
+                return [];
+            }
+        }
+
+        // ==================== 初始化和渲染 ====================
+
+        // 初始化
+        async function init() {
+            setupEventListeners();
+            renderIndustries();
+
+            // 检查API状态
+            const isOnline = await checkApiStatus();
+
+            if (isOnline) {
+                addSystemMessage('✅ Tushare API连接成功！正在加载最新A股数据...');
+                await loadAllData();
+            } else {
+                addSystemMessage('⚠️ 无法连接到后端API服务。请先启动Python服务：<br><code class="text-amber-400 text-sm">python stock_api_server.py</code>');
+            }
+        }
+
+        // 加载所有数据
+        async function loadAllData() {
+            if (!apiOnline) {
+                addSystemMessage('❌ API离线，无法加载数据');
+                return;
+            }
+
+            const refreshBtn = document.getElementById('refreshBtn');
+            refreshBtn.innerHTML = '<span class="loading-spinner"></span>';
+
+            let totalStocks = 0;
+            const industryPromises = industries.map(async (ind) => {
+                try {
+                    const data = await fetchIndustryFinancialData(ind.id);
+                    cachedStockData[ind.id] = data;
+                    totalStocks += data.length;
+                } catch (error) {
+                    console.error(`加载${ind.name}行业数据失败:`, error);
+                    cachedStockData[ind.id] = [];
+                }
+            });
+
+            await Promise.all(industryPromises);
+
+            // 更新UI
+            refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+            document.getElementById('updateTime').textContent = new Date().toLocaleString('zh-CN');
+            document.getElementById('stockCount').textContent = totalStocks + ' 只';
+
+            renderIndustries();
+
+            if (totalStocks > 0) {
+                addSystemMessage(`✅ 数据加载完成！共获取 ${totalStocks} 只股票的专业数据（来源：Tushare Pro）`);
+            } else {
+                addSystemMessage('⚠️ 未获取到数据，可能是非交易时间或API限制');
+            }
+        }
+
+        // 刷新所有数据
+        async function refreshAllData() {
+            await checkApiStatus();
+            if (apiOnline) {
+                await loadAllData();
+            } else {
+                addSystemMessage('❌ API离线，请检查Python服务是否运行');
+            }
+        }
+
+        // 渲染行业列表
+        function renderIndustries() {
+            const container = document.getElementById('industryList');
+            container.innerHTML = industries.map(ind => {
+                const count = cachedStockData[ind.id]?.length || 0;
+                const hasData = count > 0;
+
+                return `
+                    <button onclick="selectIndustry('${ind.id}')"
+                        class="industry-btn w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition ${selectedIndustry === ind.id ? 'bg-gradient-to-r ' + ind.color + ' text-white' : 'bg-slate-700/30 text-slate-300 hover:bg-slate-700'}"
+                        data-industry="${ind.id}">
+                        <i class="fas ${ind.icon}"></i>
+                        <span class="flex-1">${ind.name}</span>
+                        <span class="text-xs opacity-70">${hasData ? count + '只' : apiOnline ? '加载中' : '离线'}</span>
+                    </button>
+                `;
+            }).join('');
+        }
+
+        // 设置事件监听
+        function setupEventListeners() {
+            document.getElementById('userInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendMessage();
+            });
+
+            document.getElementById('recommendCount').addEventListener('input', (e) => {
+                document.getElementById('recommendCountValue').textContent = e.target.value + ' 只股票';
+            });
+        }
+
+        // ==================== 消息处理 ====================
+
+        function addSystemMessage(content) {
+            const container = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message-enter';
+            messageDiv.innerHTML = `
+                <div class="flex items-start gap-3">
+                    <div class="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-robot text-white"></i>
+                    </div>
+                    <div class="bg-slate-700/50 rounded-2xl rounded-tl-none px-4 py-3 max-w-2xl">
+                        <p class="text-slate-200">${content}</p>
+                    </div>
+                </div>
+            `;
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function addMessage(content, type, isTyping = false) {
+            const container = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message-enter';
+
+            if (type === 'user') {
+                messageDiv.innerHTML = `
+                    <div class="flex items-start gap-3 justify-end">
+                        <div class="bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-2xl rounded-tr-none px-4 py-3 max-w-2xl">
+                            <p class="text-white">${content}</p>
+                        </div>
+                        <div class="w-10 h-10 rounded-full bg-slate-600 flex items-center justify-center flex-shrink-0">
+                            <i class="fas fa-user text-white"></i>
+                        </div>
+                    </div>
+                `;
+            } else {
+                if (isTyping) {
+                    messageDiv.id = 'typingIndicator';
+                    messageDiv.innerHTML = `
+                        <div class="flex items-start gap-3">
+                            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0">
+                                <i class="fas fa-robot text-white"></i>
+                            </div>
+                            <div class="bg-slate-700/50 rounded-2xl rounded-tl-none px-4 py-3">
+                                <div class="typing-indicator flex gap-1">
+                                    <span class="w-2 h-2 bg-slate-400 rounded-full"></span>
+                                    <span class="w-2 h-2 bg-slate-400 rounded-full"></span>
+                                    <span class="w-2 h-2 bg-slate-400 rounded-full"></span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    messageDiv.innerHTML = `
+                        <div class="flex items-start gap-3">
+                            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0">
+                                <i class="fas fa-robot text-white"></i>
+                            </div>
+                            <div class="bg-slate-700/50 rounded-2xl rounded-tl-none px-4 py-3 max-w-2xl">
+                                ${content}
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function removeTypingIndicator() {
+            const indicator = document.getElementById('typingIndicator');
+            if (indicator) indicator.remove();
+        }
+
+        function showTyping() {
+            addMessage('', 'assistant', true);
+        }
+
+        function removeTyping() {
+            removeTypingIndicator();
+        }
+
+        // ==================== 用户交互 ====================
+
+        function sendMessage() {
+            const input = document.getElementById('userInput');
+            const message = input.value.trim();
+            if (!message) return;
+
+            addMessage(message, 'user');
+            input.value = '';
+            processUserMessage(message);
+        }
+
+        function processUserMessage(message) {
+            showTyping();
+
+            setTimeout(() => {
+                removeTyping();
+                let response = '';
+
+                if (message.includes('分析') || message.includes('推荐')) {
+                    if (selectedIndustry) {
+                        response = analyzeIndustry(selectedIndustry);
+                    } else {
+                        response = generateIndustrySelectionPrompt();
+                    }
+                } else if (message.includes('科技')) {
+                    selectIndustry('tech');
+                    return;
+                } else if (message.includes('金融')) {
+                    selectIndustry('finance');
+                    return;
+                } else if (message.includes('医疗') || message.includes('医药')) {
+                    selectIndustry('healthcare');
+                    return;
+                } else if (message.includes('消费')) {
+                    selectIndustry('consumer');
+                    return;
+                } else if (message.includes('报告')) {
+                    generateReport();
+                    return;
+                } else if (message.includes('对比') || message.includes('比较')) {
+                    response = compareStocks();
+                } else if (message.includes('刷新')) {
+                    response = '正在刷新Tushare数据...';
+                    refreshAllData();
+                    return;
+                } else if (message.includes('状态')) {
+                    response = apiOnline ?
+                        '<p class="text-emerald-400"><i class="fas fa-check-circle mr-2"></i>Tushare API服务正常，数据来���可靠</p>' :
+                        '<p class="text-red-400"><i class="fas fa-times-circle mr-2"></i>Tushare API服务离线，请检查Python服务</p>';
+                } else {
+                    response = `
+                        <p class="text-slate-200">感谢您的提问！作为您的投资分析助手，我可以帮您：</p>
+                        <ul class="text-slate-300 mt-2 space-y-1 text-sm">
+                            <li><i class="fas fa-chevron-right text-emerald-400 mr-2"></i>选择左侧行业开始分析</li>
+                            <li><i class="fas fa-chevron-right text-emerald-400 mr-2"></i>发送"分析"获取当前行业推荐</li>
+                            <li><i class="fas fa-chevron-right text-emerald-400 mr-2"></i>发送"报告"生成详细投资报告</li>
+                            <li><i class="fas fa-chevron-right text-emerald-400 mr-2"></i>发送"刷新"重新获取Tushare数据</li>
+                        </ul>
+                    `;
+                }
+
+                addMessage(response, 'assistant');
+            }, 800);
+        }
+
+        function selectIndustry(industryId) {
+            selectedIndustry = industryId;
+            renderIndustries();
+            const industry = industries.find(i => i.id === industryId);
+            addMessage(`用户选择了 ${industry.name} 行业`, 'user');
+            analyzeIndustry(industryId);
+        }
+
+        function quickAction(action) {
+            switch(action) {
+                case 'analyze':
+                    if (selectedIndustry) {
+                        addMessage(`分析当前选中的${industries.find(i => i.id === selectedIndustry).name}行业`, 'user');
+                        showTyping();
+                        setTimeout(() => {
+                            removeTyping();
+                            addMessage(analyzeIndustry(selectedIndustry), 'assistant');
+                        }, 600);
+                    } else {
+                        addMessage('请先选择一个行业', 'user');
+                        showTyping();
+                        setTimeout(() => {
+                            removeTyping();
+                            addMessage(generateIndustrySelectionPrompt(), 'assistant');
+                        }, 500);
+                    }
+                    break;
+                case 'report':
+                    generateReport();
+                    break;
+                case 'compare':
+                    addMessage('对比分析优质股票', 'user');
+                    showTyping();
+                    setTimeout(() => {
+                        removeTyping();
+                        addMessage(compareStocks(), 'assistant');
+                    }, 600);
+                    break;
+                case 'top':
+                    addMessage('显示涨幅榜', 'user');
+                    showTyping();
+                    setTimeout(() => {
+                        removeTyping();
+                        addMessage(showTopGainers(), 'assistant');
+                    }, 600);
+                    break;
+            }
+        }
+
+        // ==================== 分析函数 ====================
+
+        function analyzeIndustry(industryId) {
+            const industry = industries.find(i => i.id === industryId);
+            const stocks = cachedStockData[industryId] || [];
+            const strategy = document.getElementById('strategy').value;
+            const count = parseInt(document.getElementById('recommendCount').value);
+
+            if (stocks.length === 0) {
+                return `<p class="text-amber-400"><i class="fas fa-exclamation-triangle mr-2"></i>${industry.name}行业暂无数据，请刷新重试。</p>`;
+            }
+
+            // 根据策略筛选股票
+            let filteredStocks = [...stocks];
+            if (strategy === 'value') {
+                filteredStocks.sort((a, b) => a.pe - b.pe);
+            } else if (strategy === 'growth') {
+                filteredStocks.sort((a, b) => b.roe - a.roe);
+            } else if (strategy === 'dividend') {
+                filteredStocks.sort((a, b) => b.dividend - a.dividend);
+            } else {
+                filteredStocks.sort((a, b) => b.score - a.score);
+            }
+
+            const recommendedStocks = filteredStocks.slice(0, count);
+
+            let html = `
+                <p class="text-slate-200 mb-3"><strong>${industry.name}行业分析结果</strong>（${strategy === 'value' ? '价值投资' : strategy === 'growth' ? '成长投资' : strategy === 'dividend' ? '红利投资' : '平衡策略'}）</p>
+                <div class="space-y-3">
+            `;
+
+            recommendedStocks.forEach((stock, index) => {
+                const scoreColor = stock.score >= 85 ? 'text-emerald-400' : stock.score >= 75 ? 'text-yellow-400' : 'text-slate-400';
+                const changeClass = stock.change > 0 ? 'price-up' : stock.change < 0 ? 'price-down' : 'price-flat';
+                const changeIcon = stock.change > 0 ? 'fa-arrow-up' : stock.change < 0 ? 'fa-arrow-down' : 'fa-minus';
+                const code = stock.code.replace('.SH', '').replace('.SZ', '');
+
+                html += `
+                    <div class="bg-slate-600/30 rounded-lg p-3">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <span class="text-white font-medium">${stock.name}</span>
+                                <span class="text-slate-400 text-sm ml-2">${code}</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="${scoreColor} text-sm font-medium">${stock.score}分</span>
+                                <span class="text-white text-sm font-medium">¥${stock.price.toFixed(2)}</span>
+                                <span class="${changeClass} text-xs">
+                                    <i class="fas ${changeIcon} mr-1"></i>${stock.change > 0 ? '+' : ''}${stock.change.toFixed(2)}%
+                                </span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-4 gap-2 text-xs">
+                            <div class="text-slate-400">PE: <span class="text-slate-200">${stock.pe}</span></div>
+                            <div class="text-slate-400">PB: <span class="text-slate-200">${stock.pb}</span></div>
+                            <div class="text-slate-400">ROE: <span class="text-slate-200">${stock.roe}%</span></div>
+                            <div class="text-slate-400">股息: <span class="text-slate-200">${stock.dividend}%</span></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                </div>
+                <p class="text-slate-400 text-xs mt-3">
+                    <i class="fas fa-database mr-1"></i>
+                    数据来源：Tushare Pro | 更新时间：${stocks[0]?.date || '--'}
+                </p>
+            `;
+
+            return html;
+        }
+
+        function showTopGainers() {
+            if (!selectedIndustry) {
+                return '<p class="text-slate-200">请先选择一个行业，然后我会为您显示该行业的涨幅榜。</p>';
+            }
+
+            const stocks = cachedStockData[selectedIndustry] || [];
+            if (stocks.length === 0) {
+                return '<p class="text-amber-400">暂无数据</p>';
+            }
+
+            const topStocks = [...stocks].sort((a, b) => b.change - a.change).slice(0, 5);
+
+            let html = '<p class="text-slate-200 mb-3">涨幅榜 TOP5（Tushare数据）</p><div class="space-y-2">';
+
+            topStocks.forEach((stock, index) => {
+                const changeClass = stock.change > 0 ? 'price-up' : stock.change < 0 ? 'price-down' : 'price-flat';
+                const code = stock.code.replace('.SH', '').replace('.SZ', '');
+                html += `
+                    <div class="flex items-center justify-between bg-slate-600/30 rounded-lg px-3 py-2">
+                        <div class="flex items-center gap-3">
+                            <span class="${index === 0 ? 'text-amber-400' : 'text-slate-400'} text-lg font-bold">${index + 1}</span>
+                            <div>
+                                <span class="text-white font-medium">${stock.name}</span>
+                                <span class="text-slate-400 text-sm ml-2">${code}</span>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-white text-sm">¥${stock.price.toFixed(2)}</div>
+                            <div class="${changeClass} text-xs">${stock.change > 0 ? '+' : ''}${stock.change.toFixed(2)}%</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            return html;
+        }
+
+        function compareStocks() {
+            if (!selectedIndustry) {
+                return '<p class="text-slate-200">请先选择一个行业，然后我会为您对比该行业的优质股票。</p>';
+            }
+
+            const stocks = (cachedStockData[selectedIndustry] || []).slice(0, 4);
+            if (stocks.length === 0) {
+                return '<p class="text-amber-400">暂无数据</p>';
+            }
+
+            let html = '<p class="text-slate-200 mb-3">股票对比分析</p><div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-slate-600/50"><th class="px-3 py-2 text-left text-slate-200">股票</th><th class="px-3 py-2 text-right text-slate-200">价格</th><th class="px-3 py-2 text-right text-slate-200">涨跌幅</th><th class="px-3 py-2 text-right text-slate-200">PE</th><th class="px-3 py-2 text-right text-slate-200">ROE</th><th class="px-3 py-2 text-right text-slate-200">评分</th></tr></thead><tbody>';
+
+            stocks.forEach(stock => {
+                const changeClass = stock.change > 0 ? 'price-up' : stock.change < 0 ? 'price-down' : 'price-flat';
+                const code = stock.code.replace('.SH', '').replace('.SZ', '');
+                html += `<tr class="border-t border-slate-700/50">
+                    <td class="px-3 py-2 text-white">${stock.name}<br><span class="text-slate-400 text-xs">${code}</span></td>
+                    <td class="px-3 py-2 text-right text-slate-200">¥${stock.price.toFixed(2)}</td>
+                    <td class="px-3 py-2 text-right ${changeClass}">${stock.change > 0 ? '+' : ''}${stock.change.toFixed(2)}%</td>
+                    <td class="px-3 py-2 text-right text-slate-200">${stock.pe}</td>
+                    <td class="px-3 py-2 text-right text-slate-200">${stock.roe}%</td>
+                    <td class="px-3 py-2 text-right ${stock.score >= 85 ? 'text-emerald-400' : 'text-yellow-400'}">${stock.score}</td>
+                </tr>`;
+            });
+
+            html += '</tbody></table></div>';
+            return html;
+        }
+
+        function generateIndustrySelectionPrompt() {
+            return `
+                <p class="text-slate-200">请先选择一个行业进行分析：</p>
+                <div class="grid grid-cols-4 gap-2 mt-3">
+                    ${industries.map(ind => `
+                        <button onclick="selectIndustry('${ind.id}')" class="bg-slate-600/50 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded-lg text-sm transition">
+                            <i class="fas ${ind.icon} mr-1"></i>${ind.name}
+                        </button>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // ==================== 报告生成 ====================
+
+        function generateReport() {
+            if (!selectedIndustry) {
+                addMessage('请先选择一个行业以生成报告', 'user');
+                showTyping();
+                setTimeout(() => {
+                    removeTyping();
+                    addMessage(generateIndustrySelectionPrompt(), 'assistant');
+                }, 500);
+                return;
+            }
+
+            showTyping();
+            setTimeout(() => {
+                removeTyping();
+                const industry = industries.find(i => i.id === selectedIndustry);
+                const stocks = cachedStockData[selectedIndustry] || [];
+                const strategy = document.getElementById('strategy').value;
+                const strategyNames = { value: '价值投资', growth: '成长投资', dividend: '红利投资', balanced: '平衡策略' };
+
+                if (stocks.length === 0) {
+                    addMessage('❌ 暂无数据，请刷新后重试', 'assistant');
+                    return;
+                }
+
+                // 筛选推荐股票
+                let filteredStocks = [...stocks];
+                if (strategy === 'value') {
+                    filteredStocks.sort((a, b) => a.pe - b.pe);
+                } else if (strategy === 'growth') {
+                    filteredStocks.sort((a, b) => b.roe - a.roe);
+                } else if (strategy === 'dividend') {
+                    filteredStocks.sort((a, b) => b.dividend - a.dividend);
+                } else {
+                    filteredStocks.sort((a, b) => b.score - a.score);
+                }
+
+                const topStocks = filteredStocks.slice(0, 5);
+                const avgPe = (topStocks.reduce((sum, s) => sum + s.pe, 0) / topStocks.length).toFixed(2);
+                const avgPb = (topStocks.reduce((sum, s) => sum + s.pb, 0) / topStocks.length).toFixed(2);
+                const avgRoe = (topStocks.reduce((sum, s) => sum + s.roe, 0) / topStocks.length).toFixed(2);
+                const avgDividend = (topStocks.reduce((sum, s) => sum + s.dividend, 0) / topStocks.length).toFixed(2);
+
+                const reportHtml = `
+                    <div class="report-section">
+                        <!-- 报告头部 -->
+                        <div class="text-center mb-8 pb-6 border-b">
+                            <h1 class="text-2xl font-bold text-slate-800 mb-2">${industry.name}行业投资分析报告</h1>
+                            <p class="text-slate-500">智能投资分析系统 · 生成时间：${new Date().toLocaleString('zh-CN')}</p>
+                            <p class="text-slate-400 text-sm mt-1">数据来源：Tushare Pro API</p>
+                        </div>
+
+                        <!-- 投资概览 -->
+                        <div class="report-section mb-6">
+                            <h2 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                                <span class="w-1 h-5 bg-blue-500 mr-2"></span>投资概览
+                            </h2>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="bg-blue-50 rounded-lg p-4 text-center">
+                                    <p class="text-slate-500 text-sm">投资策略</p>
+                                    <p class="text-xl font-bold text-blue-600">${strategyNames[strategy]}</p>
+                                </div>
+                                <div class="bg-emerald-50 rounded-lg p-4 text-center">
+                                    <p class="text-slate-500 text-sm">推荐股票</p>
+                                    <p class="text-xl font-bold text-emerald-600">${topStocks.length}只</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 行业分析 -->
+                        <div class="report-section mb-6">
+                            <h2 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                                <span class="w-1 h-5 bg-purple-500 mr-2"></span>行业分析
+                            </h2>
+                            <div class="bg-slate-50 rounded-lg p-4">
+                                <p class="text-slate-600 mb-3">${industry.name}行业当前市场表现，经过综合分析，我们从该行业精选出${topStocks.length}只优质股票推荐给投资者。数据基于Tushare Pro专业金融数据库。</p>
+                                <div class="grid grid-cols-4 gap-3">
+                                    <div class="text-center">
+                                        <p class="text-2xl font-bold text-blue-600">${avgPe}</p>
+                                        <p class="text-slate-500 text-sm">平均PE</p>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-2xl font-bold text-purple-600">${avgPb}</p>
+                                        <p class="text-slate-500 text-sm">平均PB</p>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-2xl font-bold text-emerald-600">${avgRoe}%</p>
+                                        <p class="text-slate-500 text-sm">平均ROE</p>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-2xl font-bold text-amber-600">${avgDividend}%</p>
+                                        <p class="text-slate-500 text-sm">平均股息率</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 推荐股票 -->
+                        <div class="report-section mb-6">
+                            <h2 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                                <span class="w-1 h-5 bg-emerald-500 mr-2"></span>推荐股票详情
+                            </h2>
+                            <div class="space-y-3">
+                                ${topStocks.map((stock, index) => {
+                                    const code = stock.code.replace('.SH', '').replace('.SZ', '');
+                                    return `
+                                    <div class="border rounded-lg p-4 ${index === 0 ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200'}">
+                                        <div class="flex justify-between items-start mb-3">
+                                            <div>
+                                                <h3 class="font-semibold text-slate-800">${stock.name} (${code})</h3>
+                                                ${index === 0 ? '<span class="inline-block bg-emerald-500 text-white text-xs px-2 py-0.5 rounded mt-1">首选推荐</span>' : ''}
+                                            </div>
+                                            <div class="text-right">
+                                                <p class="text-xl font-bold text-slate-800">¥${stock.price.toFixed(2)}</p>
+                                                <p class="text-sm ${stock.change > 0 ? 'text-red-500' : stock.change < 0 ? 'text-green-500' : 'text-slate-500'}">
+                                                    ${stock.change > 0 ? '+' : ''}${stock.change.toFixed(2)}%
+                                                </p>
+                                                <p class="text-sm ${stock.score >= 85 ? 'text-emerald-600' : 'text-amber-600'}">综合评分：${stock.score}</p>
+                                            </div>
+                                        </div>
+                                        <div class="grid grid-cols-5 gap-3 text-sm">
+                                            <div class="bg-white rounded p-2 text-center border">
+                                                <p class="text-slate-400 text-xs">市盈率PE</p>
+                                                <p class="font-semibold text-slate-700">${stock.pe}</p>
+                                            </div>
+                                            <div class="bg-white rounded p-2 text-center border">
+                                                <p class="text-slate-400 text-xs">市净率PB</p>
+                                                <p class="font-semibold text-slate-700">${stock.pb}</p>
+                                            </div>
+                                            <div class="bg-white rounded p-2 text-center border">
+                                                <p class="text-slate-400 text-xs">ROE</p>
+                                                <p class="font-semibold text-slate-700">${stock.roe}%</p>
+                                            </div>
+                                            <div class="bg-white rounded p-2 text-center border">
+                                                <p class="text-slate-400 text-xs">股息率</p>
+                                                <p class="font-semibold text-slate-700">${stock.dividend}%</p>
+                                            </div>
+                                            <div class="bg-white rounded p-2 text-center border">
+                                                <p class="text-slate-400 text-xs">建议仓位</p>
+                                                <p class="font-semibold ${stock.score >= 85 ? 'text-emerald-600' : 'text-blue-600'}">${stock.score >= 85 ? '20%' : stock.score >= 80 ? '15%' : '10%'}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `}).join('')}
+                            </div>
+                        </div>
+
+                        <!-- 投资建议 -->
+                        <div class="report-section mb-6">
+                            <h2 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                                <span class="w-1 h-5 bg-amber-500 mr-2"></span>投资建议
+                            </h2>
+                            <div class="bg-amber-50 rounded-lg p-4">
+                                <div class="space-y-2 text-slate-700 text-sm">
+                                    <p><i class="fas fa-check-circle text-emerald-500 mr-2"></i><strong>首选标的：</strong>${topStocks[0].name}综合评分最高，建议重点配置</p>
+                                    <p><i class="fas fa-check-circle text-emerald-500 mr-2"></i><strong>分批建仓：</strong>建议分3-5次建仓，降低买入成本波动风险</p>
+                                    <p><i class="fas fa-check-circle text-emerald-500 mr-2"></i><strong>止盈策略：</strong>建议设置10-20%的止盈位，根据市场情况灵活调整</p>
+                                    <p><i class="fas fa-check-circle text-emerald-500 mr-2"></i><strong>止损设置：</strong>建议设置5-8%的止损位，控制单笔损失</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 风险提示 -->
+                        <div class="report-section">
+                            <h2 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                                <span class="w-1 h-5 bg-red-500 mr-2"></span>风险提示
+                            </h2>
+                            <div class="bg-red-50 rounded-lg p-4">
+                                <ul class="space-y-1 text-sm text-red-700">
+                                    <li><i class="fas fa-exclamation-triangle mr-2"></i>本报告仅供参考，不构成投资建议</li>
+                                    <li><i class="fas fa-exclamation-triangle mr-2"></i>股市有风险，投资需谨慎</li>
+                                    <li><i class="fas fa-exclamation-triangle mr-2"></i>过往表现不代表未来收益</li>
+                                    <li><i class="fas fa-exclamation-triangle mr-2"></i>请根据自身风险承受能力做出投资决策</li>
+                                    <li><i class="fas fa-exclamation-triangle mr-2"></i>数据来源：Tushare Pro，请以实际交易数据为准</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <!-- 报告尾部 -->
+                        <div class="mt-8 pt-4 border-t text-center text-slate-400 text-sm">
+                            <p>本报告由智能投资分析系统生成 | 数据来源：Tushare Pro API | 仅供学习参考</p>
+                        </div>
+                    </div>
+                `;
+
+                document.getElementById('reportContent').innerHTML = reportHtml;
+                document.getElementById('reportModal').classList.remove('hidden');
+                addMessage('✅ 投资分析报告已生成！', 'assistant');
+            }, 1000);
+        }
+
+        function closeReport() {
+            document.getElementById('reportModal').classList.add('hidden');
+        }
+
+        function printReport() {
+            window.print();
+        }
+
+        function clearChat() {
+            const container = document.getElementById('chatContainer');
+            container.innerHTML = `
+                <div class="message-enter">
+                    <div class="flex items-start gap-3">
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0">
+                            <i class="fas fa-robot text-white"></i>
+                        </div>
+                        <div class="bg-slate-700/50 rounded-2xl rounded-tl-none px-4 py-3 max-w-2xl">
+                            <p class="text-slate-200">对话已清空。请选择行业或输入您的问题。</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 启动应用
+        init();
+    </script>
+</body>
+</html>
